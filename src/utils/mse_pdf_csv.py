@@ -1,4 +1,4 @@
-# mse_data_extractor.py
+# mse_pdf_csv.py
 
 import logging
 import os
@@ -12,6 +12,7 @@ from typing import List, Optional
 import numpy as np
 import pandas as pd
 import pdfplumber
+import camelot
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -34,12 +35,15 @@ COUNTER_LIST = {'2021-2025': [
     ]}
 
 COLS = {
-    '2021-2025': ['counter_id', 'daily_range_high', 'daily_range_low',
-         'counter', 'buy_price', 'sell_price', 'previous_closing_price',
-        'today_closing_price', 'volume_traded', 'dividend_mk', 'dividend_yield_pct',
-        'earnings_yield_pct', 'pe_ratio', 'pbv_ratio', 'market_capitalization_mkmn',
-        'profit_after_tax_mkmn', 'num_shares_issue']
+    '2021-2025': ['counter_id','daily_range_high','daily_range_low','counter','buy_price','sell_price', 'previous_closing_price', 'today_closing_price',
+                      'volume_traded', 'dividend_mk', 'dividend_yield_pct',
+                      'earnings_yield_pct', 'pe_ratio', 'pbv_ratio', 'market_capitalization_mkmn',
+                      'profit_after_tax_mkmn', 'num_shares_issue']
 }
+# cols=['counter_id','daily_range_high','daily_range_low','counter','buy_price','sell_price', 'previous_closing_price', 'today_closing_price',
+#                       'volume_traded', 'dividend_mk', 'dividend_yield_pct',
+#                       'earnings_yield_pct', 'pe_ratio', 'pbv_ratio', 'market_capitalization_mkmn',
+#                       'profit_after_tax_mkmn', 'num_shares_issue']
 
 def _mkdate(y, m, d):  # y,m,d may be str
     return date(int(y), int(m), int(d))
@@ -210,26 +214,32 @@ def to_numeric_clean(val):
     - (123.45) -> -123.45
     - remove commas
     """
-    if val is None:
+    if val is None or val=="N/A":
         return np.nan
     val = str(val).strip()
     if val.lower() == "none" or val == "":
         return np.nan
     # Handle parentheses as negatives
-    if val.startswith("(") and val.endswith(")"):
-        val = "-" + val[1:-1]
+    if "(" in val and ")" in val:
+        inner = val[val.find("(")+1 : val.find(")")]
+        if inner.replace(".", "", 1).isdigit():  # numeric content
+            val = "-" + inner
+        else:  # non-numeric content
+            val = val.replace(f"({inner})", "")
     # Remove commas
     val = val.replace(",", "")
     try:
         return float(val)
     except ValueError:
         return np.nan
-
+    
 def clean_cell(x):
     if x is None:
         return None
     x = re.sub(r'\s+', ' ', str(x)).strip()
     x = x.replace('–', '-').replace('—', '-')
+    d = {'-': None}
+    x = d[x] if x in d else x
     return x if x else None
 
 def is_numericish(s: Optional[str]) -> bool:
@@ -257,32 +267,191 @@ def normalize_to_width(rows: list[list], width: int) -> list[list]:
             r = r[:width]
         out.append(r)
     return out
+#updated
+def cleans(df, col):
+    for c in df.columns:
+        if c != col:  # leave counter as string
+            df[c] = df[c].apply(to_numeric_clean)
 
-def extract_first_table(pdf_path: str | Path,
-                        out_dir: Optional[str | Path] = None,
-                        header: Optional[List[str]] = None,
-                        skip_header_rows: int = 0,
-                        auto_skip_header_like: bool = True) -> pd.DataFrame:
+    # keep only rows with at least one numeric
+    mask = df.apply(
+        lambda row: any(isinstance(val, (int, float, np.integer, np.floating)) and not pd.isna(val) 
+                        for val in row),
+        axis=1
+    )
+    df = df[mask]
+    return df
+
+def to_numeric_clean(val):
     """
-    Extract the first table. If `header` is provided, we will:
-      - optionally auto-skip any header-like rows at the top
-      - then force DataFrame columns to `header`
-
-    Parameters
-    ----------
-    pdf_path : str | Path
-    out_dir : str | Path, optional
-    header : List[str], optional
-        Hardcoded column names to use.
-    skip_header_rows : int
-        Force skipping this many rows from the top of the table before data.
-    auto_skip_header_like : bool
-        If True, skip leading header-like rows automatically.
-
-    Returns
-    -------
-    pandas.DataFrame
+    Clean and convert a value to numeric:
+    - None/empty -> NaN
+    - (123.45) -> -123.45
+    - remove commas
     """
+    if val is None or val=="N/A":
+        return np.nan
+    val = str(val).strip()
+    if val.lower() == "none" or val == "":
+        return np.nan
+    # Handle parentheses
+    if "(" in val and ")" in val:
+        inner = val[val.find("(")+1 : val.find(")")]
+        if inner.replace(".", "", 1).isdigit():  # numeric content
+            val = "-" + inner
+    else:  # non-numeric content
+        val = val.replace(f"({inner})", "")
+    # Remove commas
+    val = val.replace(",", "")
+    val = val.replace("*", "")
+    try:
+        return float(val)
+    except ValueError:
+        return val
+#added function1
+def shape14(df):
+    df['col_00']=df['col_0'].apply(lambda x:str(x).split(' ')[0])
+    df['col_01']=df['col_0'].apply(lambda x:str(x).split(' ')[1] if len(str(x).split(' '))>1 else " ")
+    df['col_02']=df['col_0'].apply(lambda x:str(x).split(' ')[2] if len(str(x).split(' '))>2 else " ")
+    df['col_55']=df['col_5'].apply(lambda x:str(x).split(' ')[0])
+    df['col_51']=df['col_5'].apply(lambda x:str(x).split(' ')[1] if len(str(x).split(' '))>1 else " ")
+    df['col_0']=df['col_00']
+    df['col_5']=df['col_55']
+    del df['col_00']
+    del df['col_55']
+    df=df[['col_0','col_01', 'col_02', 'col_1', 'col_2', 'col_3', 'col_4', 'col_5','col_51', 'col_6', 'col_7',
+           'col_8', 'col_9', 'col_10', 'col_11', 'col_12', 'col_13']]
+    return df
+#added function2
+def shape16(df,trade_date):
+    if str(trade_date) in ['2018-08-10','2018-08-06','2018-07-02']:
+        df['col_00']=df['col_0'].apply(lambda x:str(x).split(' ')[0])
+        df['col_01']=df['col_0'].apply(lambda x:str(x).split(' ')[1] if len(str(x).split(' '))>1 else " ")
+        df['col_02']=df['col_0'].apply(lambda x:str(x).split(' ')[1] if len(str(x).split(' '))>1 else " ")
+        df['col_0']=df['col_00']
+        del df['col_00']
+        df=df[['col_0','col_01', 'col_02', 'col_1', 'col_2', 'col_3', 'col_4', 'col_5', 'col_6', 'col_7',
+           'col_9', 'col_10', 'col_11', 'col_12', 'col_13', 'col_14', 'col_15']]
+        col = 'col_1'
+        df = cleans(df, col)
+        df = df[df[col].notna()]
+        if str(trade_date) in ['2018-08-10','2018-08-06']:
+            df['col_7']=df['col_6']+df['col_7']
+            df['col_6']=df['col_5'].apply(lambda x:x.split()[1])
+            df['col_5']=df['col_5'].apply(lambda x:x.split()[0])
+    elif str(trade_date) in ['2018-06-26']:
+        df['col_00']=df['col_0'].apply(lambda x:str(x).split(' ')[0])
+        df['col_01']=df['col_0'].apply(lambda x:str(x).split(' ')[1] if len(str(x).split(' '))>1 else " ")
+        df['col_0']=df['col_00']
+        del df['col_00']
+        df=df[['col_0', 'col_01', 'col_1', 'col_2', 'col_3', 'col_4', 'col_5', 'col_6', 'col_7',
+               'col_8', 'col_9', 'col_10', 'col_11', 'col_12', 'col_13', 'col_14',
+               'col_15']]
+        col='col_2'
+        df = cleans(df, col)
+        df = df[df[col].notna()]
+    else:
+        df['col_77']=df['col_7'].apply(lambda x:str(x).split(' ')[0])
+        df['col_71']=df['col_7'].apply(lambda x:str(x).split(' ')[1] if len(str(x).split(' '))>1 else " ")
+       
+        df['col_7']=df['col_77']
+        del df['col_77']
+        df=df[['col_0', 'col_1', 'col_2', 'col_3', 'col_4', 'col_5', 'col_6', 'col_7','col_71',
+           'col_8', 'col_9', 'col_10', 'col_11', 'col_12', 'col_13', 'col_14',
+           'col_15']] 
+        col = 'col_3'
+        df = cleans(df, col)
+        df = df[df[col].notna()]
+    return df
+#added function3
+def shape19(df):
+    df['col_00']=df['col_0'].apply(lambda x:str(x).split(' ')[0])
+    df['col_01']=df['col_0'].apply(lambda x:str(x).split(' ')[1] if len(str(x).split(' '))>1 else " ")
+    df['col_02']=df['col_0'].apply(lambda x:str(x).split(' ')[1] if len(str(x).split(' '))>1 else " ")
+    
+    df['col_0']=df['col_00']
+    del df['col_00']
+    df=df[['col_0', 'col_01','col_02','col_1', 'col_2', 'col_3', 'col_4', 'col_5', 'col_6', 'col_7',
+       'col_8', 'col_9', 'col_10', 'col_11', 'col_12', 'col_13', 'col_14',
+       'col_15','col_16','col_17','col_18']]
+           
+    return df
+#added function4
+def dp(row):
+    n=len(str(row['col_18']))-2
+    i=1
+    for j in range(n):
+        i*=10
+    return float(row['col_17'])*i+float(row['col_18'])
+#added fuction5
+def shape15(df,col):
+    df =df[:-1]
+    df=cleans(df, col)
+    df = df[df[col].notna()]
+    cl=df.columns
+    df['col_01']=np.nan
+    df['col_02']=np.nan
+    df=df[[cl[0],'col_01','col_01',cl[1],cl[2],cl[3],cl[4],cl[5],cl[6],cl[7],cl[8],cl[9],cl[10],cl[11],cl[12],cl[13],cl[14]]]
+    return df
+#added function6
+def genshape(df,col):
+    df =df[:-4]
+    df=cleans(df, col)
+    df = df[df[col].notna()]
+    df = df.dropna(axis=1, how="all")
+    df['col_0']=np.nan
+    df['col_1']=np.nan
+    df['col_10']=np.nan
+    df['col_11']=np.nan
+    cl=df.columns
+    df=df[['col_0','col_1',cl[0],cl[1],cl[2],cl[3],'col_10','col_11',cl[4],cl[5],cl[6],cl[7],cl[8],cl[9],cl[10],cl[11]]]
+    df=df.reset_index()
+    return df
+#added function7
+def stream_f(pdf_path,col,date):
+    tables = camelot.read_pdf(pdf_path, pages='1', flavor='stream') 
+    first_table = tables[0].df
+    df_first = pd.DataFrame(first_table)
+    df = df_first.reset_index(drop=True)
+    df.columns=[f"col_{n}" for n in df.columns]
+    if str(date) in ['2018-07-20','2018-07-10']:
+        df = cleans(df, col)
+        df = df[df[col].notna()]
+        del df['col_9']
+        df['col_8'].fillna(value=0, inplace=True)
+    elif str(date) =='2018-07-26':
+        df = cleans(df, col)
+        df = df[df[col].notna()]
+        df['col_2']=df['col_1']
+        df.iat[-2,3]='TNM'
+    else:
+        df = cleans(df, col)
+        df = df[df[col].notna()]
+    df=df[:-1]
+    return df
+#added function
+def processshape15(df,col,print_date):
+    df=shape15(df,col)
+    if str(print_date)=='2018-08-13':
+        df['col_10']=df['col_9']
+        df['col_9']=df['col_8']
+        df['col_8']=df['col_7']
+        df['col_7']=df['col_6']
+        df['col_6']=df['col_5'].apply(lambda x:x.split()[1])
+        df['col_5']=df['col_5'].apply(lambda x:x.split()[0])
+    if str(print_date) in ['2018-06-25','2018-06-22','2018-06-21','2018-06-20','2018-06-19','2018-06-18']:
+        def mapper(row):
+            if len(str(row['col_6']).split())==1:
+                return row['col_7'] 
+            else:
+                return str(row['col_6']).split()[1]+str(row['col_7'])
+        df['col_7']=df.apply(mapper,axis=1)
+        df['col_6']=df['col_6'].apply(lambda x:float(str(x).split()[0]))
+    return df
+#Function updated
+def extract_first_table(pdf_path: str | Path,out_dir: Optional[str | Path] = None,) -> pd.DataFrame:
+    date1=['2017-11-20','2017-12-27','2017-09-14','2018-01-08','2018-01-09','2018-06-11','2018-02-16','2018-05-17']
+    date2=['2018-07-03','2018-07-04','2018-07-05','2018-07-09','2018-07-10','2018-07-12','2018-07-13','2018-07-16','2018-07-17','2018-07-18','2018-07-19','2018-07-20','2018-07-23','2018-07-25','2018-07-26','2018-07-27','2018-06-27']
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
             # Try a few strategies to find tables
@@ -306,90 +475,91 @@ def extract_first_table(pdf_path: str | Path,
 
             if not tables:
                 continue
-
             # Use the first table found
             raw = tables[0]
             rows = [[clean_cell(c) for c in row] for row in raw]
             rows = [r for r in rows if any(c for c in r)]
-            if not rows:
-                continue
-
-            # Decide how many rows to skip from top if header is provided
-            start_idx = 0
-            if header:
-                if auto_skip_header_like:
-                    # Skip all consecutive header-like rows from the top
-                    auto_skip = 0
-                    for r in rows:
-                        if is_header_like(r):
-                            auto_skip += 1
-                        else:
-                            break
-                    start_idx = auto_skip
-                # Ensure at least skip_header_rows are skipped
-                start_idx = max(start_idx, skip_header_rows)
-                cols = list(header)
-            else:
-                # Fallback: auto-detect header = first non-empty row
-                detected = rows[0]
-                start_idx = 1
-                cols = []
-                seen = {}
-                for i, name in enumerate(detected):
-                    name = name or f"col_{i+1}"
-                    name = re.sub(r'\s+', ' ', name).strip()
-                    if name in seen:
-                        seen[name] += 1
-                        name = f"{name}_{seen[name]}"
-                    else:
-                        seen[name] = 1
-                    cols.append(name)
-
             # Build DataFrame
-            data_rows = normalize_to_width(rows[start_idx:], len(cols))
-            df = pd.DataFrame(data_rows, columns=cols).dropna(how="all")
-
-            # Drop last row as it contains weighted averages
-            df = df.iloc[:-1] if len(df) > 1 else df
-
-            # Rearrange columns
-            cols = ['counter_id', 'counter', 'daily_range_high', 'daily_range_low',
-                    'buy_price', 'sell_price', 'previous_closing_price', 'today_closing_price',
-                      'volume_traded', 'dividend_mk', 'dividend_yield_pct',
-                      'earnings_yield_pct', 'pe_ratio', 'pbv_ratio', 'market_capitalization_mkmn',
-                      'profit_after_tax_mkmn', 'num_shares_issue']
-            df = df[cols]
-
-            # Convert counter_id to integer (removes decimals)
-            df['counter_id'] = pd.to_numeric(df['counter_id'], errors='coerce').astype('Int64')
-
-            # Convert to numeric where possible
-            for c in df.columns:
-                if c != "counter":  # leave counter as string
-                    df[c] = df[c].apply(to_numeric_clean)
-
-            # Create filename using file print date
+            df = pd.DataFrame(rows).dropna(how="all")
+            df.columns=[f"col_{n}" for n in df.columns]
+           
             info = extract_print_date_time(pdf_path)
             print_date = info['date']
             print_time = info['time']
+            print(df.shape)
+            col = 'col_3'
+            if str(print_date) =='2018-06-14': 
+                df =df[:-1]
+                df=cleans(df, col)
+                df = df[df[col].notna()]
+                df = df.dropna(axis=1, how="all")
+            elif str(print_date) in date1:
+                col='col_2'
+                df=genshape(df,col)
+            elif str(print_date) in date2:
+                df=stream_f(pdf_path,col,print_date)
+            elif df.shape[1] == 14:
+                df=shape14(df)
+                col = 'col_1'
+                df = cleans(df, col)
+                df = df[df[col].notna()]
+            elif df.shape[1]==15:
+                col='col_1'
+                df=processshape15(df,col,print_date)
+            elif df.shape[1] == 16:
+                df=shape16(df,print_date)
+            elif df.shape[1] == 18:
+                col = 'col_3'
+                df = cleans(df, col)
+                df = df[df[col].notna()]
+                df = df.dropna(axis=1, how="all")
+                if str(print_date)=='2018-08-07':
+                    df['col_9']=df['col_8']+df['col_9']
+                    df['col_8']=df['col_7'].apply(lambda x:x.split()[1])
+                    df['col_7']=df['col_7'].apply(lambda x:x.split()[0])
+            elif df.shape[1] == 19:
+                df=shape19(df)
+                col = 'col_1'
+                df = cleans(df, col)
+                df = df[df[col].notna()]
+                df = df.dropna(axis=1, how="all")
+                df['col_17']=df.apply(dp,axis=1)
+                del df['col_18']
+            elif df.shape[1] == 28:
+                col = 'col_2'
+                df = df[:-4]
+                df = cleans(df, col)
+                df = df.reset_index()
+                df = df[df[col].notna()]
+                df = df.dropna(axis=1, how="all")
+            elif df.shape[1] == 33:
+                col = 'col_4'
+                df = df[:-2]
+                df = cleans(df, col)
+                df = df.reset_index()
+                df = df[df[col].notna()]
+                df = df.dropna(axis=1, how="all")
+            elif df.shape[1] == 30 or df.shape[1] == 31:
+                col = 'col_2'
+                df = df[:-4]
+                print(df.shape)
+                df = cleans(df, col)
+                df = df.reset_index()
+                df = df[df[col].notna()]
+                df = df.dropna(axis=1, how="all")
+            else:
+                df = cleans(df, col)
+                df = df[df[col].notna()]
+                if str(print_date)=='2018-08-08':
+                    df['col_9']=df['col_8']
+                    df['col_8']=df['col_7'].apply(lambda x:x.split()[1])
+                    df['col_7']=df['col_7'].apply(lambda x:x.split()[0])
 
-            # Add date and print name to df
+            df.columns=cols
             df['trade_date'] = print_date
-            df['print_time'] = print_time
-
+            df['print_time'] = print_time 
             # Create CSV file based on date
             out_csv = out_dir / f"mse-daily-{print_date}.csv"
-
-            # Run checks to ensure structural correctness
-            # Number of counters and counter names
-            try:
-                assert df.shape[0] == len(COUNTER_LIST['2021-2025'])
-                assert df['counter'].nunique() == len(COUNTER_LIST['2021-2025'])
-                # assert set(list(df['counter'].dropna().unique())) == set(COUNTER_LIST['2021-2025'])
-            except AssertionError as e:
-                print(f"⚠️ Structural check failed: {e}")
-                # save pdf filename to logs_dir
-                return pd.DataFrame()
 
             if out_dir:
                 df.to_csv(out_csv, index=False)
@@ -492,13 +662,7 @@ def process_multiple_pdfs(input_dir: Path, out_dir: Path, start_date: date, cols
                 continue
             if file_date >= start_date:
                 print(f"Processing {pdf_path.name} dated {file_date}")
-                output_file = extract_first_table(
-                                    pdf_path=pdf_path,
-                                    out_dir=out_dir,
-                                    header=cols,
-                                    skip_header_rows=1,
-                                    auto_skip_header_like=True
-                                )
+                output_file = extract_first_table(pdf_path=pdf_path,out_dir=out_dir)
                 if output_file:
                     print(f"✅ Successfully Processed {pdf_path.name} -> {output_file}")
                 else:
@@ -508,11 +672,13 @@ def process_multiple_pdfs(input_dir: Path, out_dir: Path, start_date: date, cols
         except Exception as e:
             print(f"❌ Error processing {pdf_path.name}: {e}")
             output_file = None
+            not_processed.append(pdf_path.name)
 
 
     # Write to file unprocessed PDF filenames
     if not_processed:
-        log_file = logs_dir / "unprocessed_daily_pdfs.txt"
+        DIR_LOGS = Path.cwd().parent.parent / "logs/unprocessed_daily_pdfs"
+        log_file = DIR_LOGS / "unprocessed_daily_pdfs.txt"
         with open(log_file, "w") as f:
             for fname in not_processed:
                 f.write(f"{fname}\n")
@@ -548,8 +714,8 @@ def process_latest_report(input_dir: Path, out_dir: Path, cols: List[str]) -> Li
     else:
         print("❌ Failed to save data to CSV")
         sys.exit(1)
-
-def merge_csv_into_master(data_dir: Path, master_csv: Path, cols: List[str]):
+#Function updated
+def merge_csv_into_master(data_dir: Path, master_csv: Path):
     """
     Combine all daily CSV files in data_dir into a master CSV file.
     """
@@ -573,9 +739,6 @@ def merge_csv_into_master(data_dir: Path, master_csv: Path, cols: List[str]):
 
     master_df = pd.concat(df_list, ignore_index=True)
 
-    # Ensure columns are in the desired order
-    master_df = master_df[cols + ['trade_date', 'print_time']]
-
     # Remove duplicates based on counter_id and trade_date
     master_df.drop_duplicates(subset=['counter_id', 'trade_date'], keep='last', inplace=True)
 
@@ -586,18 +749,22 @@ def merge_csv_into_master(data_dir: Path, master_csv: Path, cols: List[str]):
     master_df.to_csv(master_csv, index=False)
     print(f"✅ Master CSV created at {master_csv} with {len(master_df)} unique records")
 
-def main(process_latest=True, start_date_str="2025-09-08"):
+#function updated
+def main(process_latest=True, start_date_str="2017-01-01"):
     """
     Main function to extract MSE data from PDF and save to CSV
     """
 
     # SET WORKING DIRECTORY TO SCRIPT LOCATION
+
+
     script_dir = Path(__file__).parent.parent
     DIR_DATA = script_dir.parent / "data"
-    DIR_REPORTS_PDF = DIR_DATA / "mse-daily-reports"
-    DIR_REPORTS_CSV = DIR_DATA / "mse-daily-data"
+    DIR_REPORTS_PDF = DIR_DATA / "raw_pdfs"
+    DIR_REPORTS_CSV = DIR_DATA / "csv_files"
     DIR_LOGS = script_dir / "logs/unprocessed_daily_pdfs"
-
+    DIR_COMBINED_CSV=DIR_DATA/"combined_csv"
+    combined_csv=DIR_COMBINED_CSV/"combined_csv_reports.csv"
     # Standard columns in MSE daily report: 2021
     cols = COLS['2021-2025']
     if process_latest:
@@ -608,6 +775,9 @@ def main(process_latest=True, start_date_str="2025-09-08"):
         start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
         print(f"Processing all reports from {start_date} onwards...")
         process_multiple_pdfs(DIR_REPORTS_PDF, DIR_REPORTS_CSV, start_date, cols, DIR_LOGS)
+    # Merge all daily CSVs into a combined CSV
+    merge_csv_into_master(DIR_REPORTS_CSV, combined_csv)
+        
 
 if __name__ == "__main__":
     PROCESS_LATEST = False
