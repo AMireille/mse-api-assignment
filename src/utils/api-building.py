@@ -55,15 +55,21 @@ def home():
 
 #First end-point: Call with Query parameters
 @app.get("/companies")
-def get_companies(sector: Optional[str] = Query(None, description="Filter companies by sector")):
+def get_companies(sector: Optional[str] = Query(default=None, description="Filter companies by sector")):
     """Get list of companies with optional sector filtering."""
-    df=pd.read_sql("SELECT * FROM tickers", con=engine)
+    query = text("""
+    SELECT *
+    FROM tickers t
+    JOIN daily_prices p ON t.counter_id = p.counter_id
+    """)
+    df = pd.read_sql(query, con=engine)
     df['Sector'] = df['ticker'].map(company_sector_mapping)
     df=df[['ticker','name','Sector','date_listed']]
+    # Filter by sector if provided
     if sector:
-        df=df[df['Sector']==sector]
-    data=df.to_dict(orient='records')
-    return {'count':len(data), 'data':data}
+        df = df[df['Sector'] == sector]
+    data = df.to_dict(orient='records')
+    return {'count': len(df), 'data': data}
 
 #Second end-point: Call with Path parameters
 @app.get("/companies/{ticker}")
