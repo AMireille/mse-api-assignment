@@ -1,4 +1,4 @@
-# mse_pdf_csv.py
+# mse_data_extractor.py
 
 import logging
 import os
@@ -40,10 +40,10 @@ COLS = {
                       'earnings_yield_pct', 'pe_ratio', 'pbv_ratio', 'market_capitalization_mkmn',
                       'profit_after_tax_mkmn', 'num_shares_issue']
 }
-# cols=['counter_id','daily_range_high','daily_range_low','counter','buy_price','sell_price', 'previous_closing_price', 'today_closing_price',
-#                       'volume_traded', 'dividend_mk', 'dividend_yield_pct',
-#                       'earnings_yield_pct', 'pe_ratio', 'pbv_ratio', 'market_capitalization_mkmn',
-#                       'profit_after_tax_mkmn', 'num_shares_issue']
+cols=['counter_id','daily_range_high','daily_range_low','counter','buy_price','sell_price', 'previous_closing_price', 'today_closing_price',
+                      'volume_traded', 'dividend_mk', 'dividend_yield_pct',
+                      'earnings_yield_pct', 'pe_ratio', 'pbv_ratio', 'market_capitalization_mkmn',
+                      'profit_after_tax_mkmn', 'num_shares_issue']
 
 def _mkdate(y, m, d):  # y,m,d may be str
     return date(int(y), int(m), int(d))
@@ -207,6 +207,7 @@ def extract_print_date_time(pdf_path: str | Path, search_pages: int = 2, day_fir
 
     return {'date': d, 'time': t, 'raw_date': (raw_date_snip or None), 'raw_time': (raw_time_snip or None)}
 
+#updated
 def to_numeric_clean(val):
     """
     Clean and convert a value to numeric:
@@ -220,25 +221,22 @@ def to_numeric_clean(val):
     if val.lower() == "none" or val == "":
         return np.nan
     # Handle parentheses as negatives
-    if "(" in val and ")" in val:
-        inner = val[val.find("(")+1 : val.find(")")]
-        if inner.replace(".", "", 1).isdigit():  # numeric content
-            val = "-" + inner
-        else:  # non-numeric content
-            val = val.replace(f"({inner})", "")
+    if val.startswith("(") and val.endswith(")"):
+        val = "-" + val[1:-1]
     # Remove commas
     val = val.replace(",", "")
     try:
         return float(val)
     except ValueError:
         return np.nan
-    
+#updated
 def clean_cell(x):
     if x is None:
         return None
     x = re.sub(r'\s+', ' ', str(x)).strip()
     x = x.replace('–', '-').replace('—', '-')
     d = {'-': None}
+    # just check directly, not apply
     x = d[x] if x in d else x
     return x if x else None
 
@@ -282,6 +280,8 @@ def cleans(df, col):
     df = df[mask]
     return df
 
+    
+#Function updated
 def to_numeric_clean(val):
     """
     Clean and convert a value to numeric:
@@ -294,13 +294,13 @@ def to_numeric_clean(val):
     val = str(val).strip()
     if val.lower() == "none" or val == "":
         return np.nan
-    # Handle parentheses
-    if "(" in val and ")" in val:
-        inner = val[val.find("(")+1 : val.find(")")]
-        if inner.replace(".", "", 1).isdigit():  # numeric content
-            val = "-" + inner
-    else:  # non-numeric content
-        val = val.replace(f"({inner})", "")
+    # Handle parentheses as negatives
+    if val.startswith("(") and val.endswith(")"):
+        val = "-" + val[1:-1]
+    #remove (SB) from values
+    if "(SB)" in val:
+        val=val.replace("(SB)","")
+    
     # Remove commas
     val = val.replace(",", "")
     val = val.replace("*", "")
@@ -309,7 +309,7 @@ def to_numeric_clean(val):
     except ValueError:
         return val
 #added function1
-def shape14(df):
+def special_case_14_col(df):
     df['col_00']=df['col_0'].apply(lambda x:str(x).split(' ')[0])
     df['col_01']=df['col_0'].apply(lambda x:str(x).split(' ')[1] if len(str(x).split(' '))>1 else " ")
     df['col_02']=df['col_0'].apply(lambda x:str(x).split(' ')[2] if len(str(x).split(' '))>2 else " ")
@@ -323,7 +323,7 @@ def shape14(df):
            'col_8', 'col_9', 'col_10', 'col_11', 'col_12', 'col_13']]
     return df
 #added function2
-def shape16(df,trade_date):
+def special_case_16_col(df,trade_date):
     if str(trade_date) in ['2018-08-10','2018-08-06','2018-07-02']:
         df['col_00']=df['col_0'].apply(lambda x:str(x).split(' ')[0])
         df['col_01']=df['col_0'].apply(lambda x:str(x).split(' ')[1] if len(str(x).split(' '))>1 else " ")
@@ -353,7 +353,6 @@ def shape16(df,trade_date):
     else:
         df['col_77']=df['col_7'].apply(lambda x:str(x).split(' ')[0])
         df['col_71']=df['col_7'].apply(lambda x:str(x).split(' ')[1] if len(str(x).split(' '))>1 else " ")
-       
         df['col_7']=df['col_77']
         del df['col_77']
         df=df[['col_0', 'col_1', 'col_2', 'col_3', 'col_4', 'col_5', 'col_6', 'col_7','col_71',
@@ -364,11 +363,10 @@ def shape16(df,trade_date):
         df = df[df[col].notna()]
     return df
 #added function3
-def shape19(df):
+def special_case_19_col(df):
     df['col_00']=df['col_0'].apply(lambda x:str(x).split(' ')[0])
     df['col_01']=df['col_0'].apply(lambda x:str(x).split(' ')[1] if len(str(x).split(' '))>1 else " ")
     df['col_02']=df['col_0'].apply(lambda x:str(x).split(' ')[1] if len(str(x).split(' '))>1 else " ")
-    
     df['col_0']=df['col_00']
     del df['col_00']
     df=df[['col_0', 'col_01','col_02','col_1', 'col_2', 'col_3', 'col_4', 'col_5', 'col_6', 'col_7',
@@ -384,7 +382,7 @@ def dp(row):
         i*=10
     return float(row['col_17'])*i+float(row['col_18'])
 #added fuction5
-def shape15(df,col):
+def special_case_15_col(df,col,print_date):
     df =df[:-1]
     df=cleans(df, col)
     df = df[df[col].notna()]
@@ -392,9 +390,24 @@ def shape15(df,col):
     df['col_01']=np.nan
     df['col_02']=np.nan
     df=df[[cl[0],'col_01','col_01',cl[1],cl[2],cl[3],cl[4],cl[5],cl[6],cl[7],cl[8],cl[9],cl[10],cl[11],cl[12],cl[13],cl[14]]]
+    if str(print_date)=='2018-08-13':
+        df['col_10']=df['col_9']
+        df['col_9']=df['col_8']
+        df['col_8']=df['col_7']
+        df['col_7']=df['col_6']
+        df['col_6']=df['col_5'].apply(lambda x:x.split()[1])
+        df['col_5']=df['col_5'].apply(lambda x:x.split()[0])
+    if str(print_date) in ['2018-06-25','2018-06-22','2018-06-21','2018-06-20','2018-06-19','2018-06-18']:
+        def mapper(row):
+            if len(str(row['col_6']).split())==1:
+                return row['col_7'] 
+            else:
+                return str(row['col_6']).split()[1]+str(row['col_7'])
+        df['col_7']=df.apply(mapper,axis=1)
+        df['col_6']=df['col_6'].apply(lambda x:float(str(x).split()[0]))
     return df
 #added function6
-def genshape(df,col):
+def general_shape(df,col):
     df =df[:-4]
     df=cleans(df, col)
     df = df[df[col].notna()]
@@ -408,7 +421,7 @@ def genshape(df,col):
     df=df.reset_index()
     return df
 #added function7
-def stream_f(pdf_path,col,date):
+def special_case_handling(pdf_path,col,date):
     tables = camelot.read_pdf(pdf_path, pages='1', flavor='stream') 
     first_table = tables[0].df
     df_first = pd.DataFrame(first_table)
@@ -429,29 +442,12 @@ def stream_f(pdf_path,col,date):
         df = df[df[col].notna()]
     df=df[:-1]
     return df
-#added function
-def processshape15(df,col,print_date):
-    df=shape15(df,col)
-    if str(print_date)=='2018-08-13':
-        df['col_10']=df['col_9']
-        df['col_9']=df['col_8']
-        df['col_8']=df['col_7']
-        df['col_7']=df['col_6']
-        df['col_6']=df['col_5'].apply(lambda x:x.split()[1])
-        df['col_5']=df['col_5'].apply(lambda x:x.split()[0])
-    if str(print_date) in ['2018-06-25','2018-06-22','2018-06-21','2018-06-20','2018-06-19','2018-06-18']:
-        def mapper(row):
-            if len(str(row['col_6']).split())==1:
-                return row['col_7'] 
-            else:
-                return str(row['col_6']).split()[1]+str(row['col_7'])
-        df['col_7']=df.apply(mapper,axis=1)
-        df['col_6']=df['col_6'].apply(lambda x:float(str(x).split()[0]))
-    return df
+
 #Function updated
 def extract_first_table(pdf_path: str | Path,out_dir: Optional[str | Path] = None,) -> pd.DataFrame:
     date1=['2017-11-20','2017-12-27','2017-09-14','2018-01-08','2018-01-09','2018-06-11','2018-02-16','2018-05-17']
-    date2=['2018-07-03','2018-07-04','2018-07-05','2018-07-09','2018-07-10','2018-07-12','2018-07-13','2018-07-16','2018-07-17','2018-07-18','2018-07-19','2018-07-20','2018-07-23','2018-07-25','2018-07-26','2018-07-27','2018-06-27']
+    date2=['2018-07-03','2018-07-04','2018-07-05','2018-07-09','2018-07-10','2018-07-12','2018-07-13','2018-07-16',
+           '2018-07-17','2018-07-18','2018-07-19','2018-07-20','2018-07-23','2018-07-25','2018-07-26','2018-07-27','2018-06-27']
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
             # Try a few strategies to find tables
@@ -495,19 +491,19 @@ def extract_first_table(pdf_path: str | Path,out_dir: Optional[str | Path] = Non
                 df = df.dropna(axis=1, how="all")
             elif str(print_date) in date1:
                 col='col_2'
-                df=genshape(df,col)
+                df=general_shape(df,col)
             elif str(print_date) in date2:
-                df=stream_f(pdf_path,col,print_date)
+                df=special_case_handling(pdf_path,col,print_date)
             elif df.shape[1] == 14:
-                df=shape14(df)
+                df=special_case_14_col(df)
                 col = 'col_1'
                 df = cleans(df, col)
                 df = df[df[col].notna()]
             elif df.shape[1]==15:
                 col='col_1'
-                df=processshape15(df,col,print_date)
+                df=special_case_15_col(df,col,print_date)
             elif df.shape[1] == 16:
-                df=shape16(df,print_date)
+                df=special_case_16_col(df,print_date)
             elif df.shape[1] == 18:
                 col = 'col_3'
                 df = cleans(df, col)
@@ -518,7 +514,7 @@ def extract_first_table(pdf_path: str | Path,out_dir: Optional[str | Path] = Non
                     df['col_8']=df['col_7'].apply(lambda x:x.split()[1])
                     df['col_7']=df['col_7'].apply(lambda x:x.split()[0])
             elif df.shape[1] == 19:
-                df=shape19(df)
+                df=special_case_19_col(df)
                 col = 'col_1'
                 df = cleans(df, col)
                 df = df[df[col].notna()]
@@ -756,8 +752,6 @@ def main(process_latest=True, start_date_str="2017-01-01"):
     """
 
     # SET WORKING DIRECTORY TO SCRIPT LOCATION
-
-
     script_dir = Path(__file__).parent.parent
     DIR_DATA = script_dir.parent / "data"
     DIR_REPORTS_PDF = DIR_DATA / "raw_pdfs"
@@ -765,6 +759,7 @@ def main(process_latest=True, start_date_str="2017-01-01"):
     DIR_LOGS = script_dir / "logs/unprocessed_daily_pdfs"
     DIR_COMBINED_CSV=DIR_DATA/"combined_csv"
     combined_csv=DIR_COMBINED_CSV/"combined_csv_reports.csv"
+
     # Standard columns in MSE daily report: 2021
     cols = COLS['2021-2025']
     if process_latest:
@@ -775,10 +770,7 @@ def main(process_latest=True, start_date_str="2017-01-01"):
         start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
         print(f"Processing all reports from {start_date} onwards...")
         process_multiple_pdfs(DIR_REPORTS_PDF, DIR_REPORTS_CSV, start_date, cols, DIR_LOGS)
-    # Merge all daily CSVs into a combined CSV
-    merge_csv_into_master(DIR_REPORTS_CSV, combined_csv)
-        
-
+        merge_csv_into_master(DIR_REPORTS_CSV, combined_csv)
 if __name__ == "__main__":
     PROCESS_LATEST = False
     main(process_latest=PROCESS_LATEST)
