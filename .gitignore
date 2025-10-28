@@ -93,3 +93,8 @@ _build/
 
 # setuptools-scm/
 src/*/_version.py
+
+# csv files
+*.csv
+#pdf files
+*.pdf
