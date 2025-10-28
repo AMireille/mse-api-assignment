@@ -19,8 +19,6 @@ PGPASSWORD = os.getenv("PGPASSWORD")
 
 # Create SQLAlchemy engine 
 connection_string = f"postgresql+psycopg2://{PGUSER}:{PGPASSWORD}@{PGHOST}:{PGPORT}/{PGDATABASE}"
-print("Connection psql string:", connection_string)
-
 engine = create_engine(connection_string, pool_pre_ping=True)
 
 app= FastAPI(
@@ -120,9 +118,9 @@ def get_daily_prices_by_date_range(
     # Filter by date range
     
     if start_date:
-        df = df[df['trade_date'] >=start_date]
+        df = df[df['trade_date'] >= pd.to_datetime(start_date)]
     if end_date:
-        df = df[df['trade_date'] <=end_date]
+        df = df[df['trade_date'] <= pd.to_datetime(end_date)]
 
     # Apply limit (max 1000)
     limit = min(limit or 100, 1000)
